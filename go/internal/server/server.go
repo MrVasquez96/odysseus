@@ -43,6 +43,8 @@ func New(staticFS fs.FS, apiProxy http.Handler, hardTimeout time.Duration, authC
 		routes.TaskRoutes(mux, database)
 		routes.EmailRoutes(mux, database)
 		routes.CalendarRoutes(mux, database)
+		routes.MemoryGraphRoutes(mux, database)
+		routes.VoiceRoutes(mux, database)
 	}
 
 	// Register file-backed routes (presets, preferences).
@@ -54,6 +56,9 @@ func New(staticFS fs.FS, apiProxy http.Handler, hardTimeout time.Duration, authC
 		routes.ModelRoutes(mux, database, mgr, dataDir)
 	}
 	routes.SettingsRoutes(mux, dataDir, mgr)
+
+	// Cloudflare tunnel management (admin-only).
+	routes.TunnelRoutes(mux, "localhost:7000")
 
 	// Register explicit SPA routes (except "/" which is the catch-all).
 	for route := range spaRoutes {
