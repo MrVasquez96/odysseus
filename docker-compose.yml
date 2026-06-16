@@ -1,8 +1,19 @@
+# Standalone NVIDIA GPU Compose file for stack-management UIs (Portainer,
+# Coolify, Dockhand, etc.) that accept only a single Compose file and do not
+# reliably honor COMPOSE_FILE or multiple `-f` overlays.
+#
+# This is equivalent to: docker-compose.yml + docker/gpu.nvidia.yml.
+# The base docker-compose.yml plus the docker/gpu.nvidia.yml overlay remain
+# the source of truth — CLI users should keep using the COMPOSE_FILE overlay
+# workflow. Keep this file in sync with both when either changes.
+#
+# Requires the NVIDIA Container Toolkit on the host. See docker/gpu.nvidia.yml
+# for setup details.
 services:
   odysseus:
     build: .
     ports:
-      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-7000}:7000"
     volumes:
       - ./data:/app/data:z
       - ./logs:/app/logs:z
@@ -35,7 +46,7 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - LOCALHOST_BYPASS=${LOCALHOST_BYPASS:-false}
       - ODYSSEUS_ADMIN_USER=${ODYSSEUS_ADMIN_USER:-admin}
-      - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:-}
+      - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:-admin}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1}
       - SECURE_COOKIES=${SECURE_COOKIES:-false}
       - EMBEDDING_URL=${EMBEDDING_URL:-}
@@ -63,12 +74,23 @@ services:
       # Find yours with:  id -u  /  id -g
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
+      # NVIDIA overlay (from docker/gpu.nvidia.yml).
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     depends_on:
       searxng:
         condition: service_healthy
       chromadb:
         condition: service_started
     restart: unless-stopped
+    # NVIDIA overlay (from docker/gpu.nvidia.yml).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   chromadb:
     image: docker.io/chromadb/chroma:latest

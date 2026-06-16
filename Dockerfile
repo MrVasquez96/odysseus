@@ -1,3 +1,15 @@
+# ── Stage 1: Build Go binary ──────────────────────────────────────────
+# Phase 3+: CGO_ENABLED=1 for mattn/go-sqlite3 (gcc is in golang:bookworm).
+FROM golang:1.24-bookworm AS go-builder
+WORKDIR /build
+COPY go/go.mod go/go.sum* ./go/
+COPY go/cmd/ ./go/cmd/
+COPY go/internal/ ./go/internal/
+# Copy static/ into the embed location (go:embed can't follow symlinks).
+COPY static/ ./go/cmd/odysseus/static/
+RUN cd go && CGO_ENABLED=1 go build -trimpath -o /odysseus ./cmd/odysseus/
+
+# ── Stage 2: Python + Go binary ──────────────────────────────────────
 FROM python:3.12-slim
 
 # System deps. tmux is required by Cookbook for background downloads/serves.
@@ -7,7 +19,7 @@ FROM python:3.12-slim
 # launch inside Docker.
 # nodejs/npm provide npx for the optional built-in Browser MCP server.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
-# uvicorn directly (no extra shell layer like `su`/`sudo` would add).
+# the app directly (no extra shell layer like `su`/`sudo` would add).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
@@ -29,6 +41,9 @@ COPY requirements.txt requirements-optional.txt ./
 RUN pip install --no-cache-dir -r requirements.txt \
     && if [ "$INSTALL_OPTIONAL" = "true" ]; then pip install --no-cache-dir -r requirements-optional.txt; fi
 
+# Copy Go binary from build stage
+COPY --from=go-builder /odysseus /usr/local/bin/odysseus
+
 # Copy app code
 COPY . .
 
@@ -47,4 +62,6 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 EXPOSE 7000
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7000"]
+# Go serves :7000 (public), Python serves :7001 (internal).
+# The entrypoint starts both processes.
+CMD ["odysseus"]

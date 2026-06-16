@@ -388,7 +388,19 @@ if AUTH_ENABLED:
     app.add_middleware(AuthMiddleware)
     logger.info("Auth middleware enabled (AUTH_ENABLED=true)")
 else:
-    logger.info("Auth middleware disabled (set AUTH_ENABLED=true to enable)")
+    # Phase 2+: Go owns auth. Python is loopback-only, so we trust the
+    # X-Odysseus-Owner header injected by Go's reverse proxy to identify
+    # the authenticated user. This lightweight middleware sets
+    # request.state.current_user so downstream routes work unchanged.
+    class GoProxyTrustMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            owner = (request.headers.get("X-Odysseus-Owner") or "").strip()
+            request.state.current_user = owner if owner else None
+            request.state.api_token = False
+            return await call_next(request)
+
+    app.add_middleware(GoProxyTrustMiddleware)
+    logger.info("Auth middleware disabled — trusting Go proxy (X-Odysseus-Owner header)")
 
 # ========= STATIC FILES =========
 os.makedirs(STATIC_DIR, exist_ok=True)

@@ -13,7 +13,22 @@ from starlette.responses import Response
 # routes via HTTP loopback (the agent's tool calls don't carry the
 # admin user's session cookie). Set once at import; tools read the
 # same value from this module. Never persisted or exposed externally.
-INTERNAL_TOOL_TOKEN = os.environ.get("ODYSSEUS_INTERNAL_TOKEN") or secrets.token_hex(32)
+def _load_internal_token() -> str:
+    """Read shared internal token from env or file (written by entrypoint.sh)."""
+    tok = os.environ.get("ODYSSEUS_INTERNAL_TOKEN", "").strip()
+    if tok:
+        return tok
+    token_file = os.path.join(os.path.dirname(__file__), "..", "data", ".internal_token")
+    try:
+        with open(token_file) as f:
+            tok = f.read().strip()
+        if tok:
+            return tok
+    except FileNotFoundError:
+        pass
+    return secrets.token_hex(32)
+
+INTERNAL_TOOL_TOKEN = _load_internal_token()
 INTERNAL_TOOL_HEADER = "X-Odysseus-Internal-Token"
 
 

@@ -85,7 +85,59 @@ export PATH="/app/.local/bin:$PATH"
 # || true so a setup failure never prevents the container from starting.
 gosu "$PUID:$PGID" python /app/setup.py || true
 
-# Drop root and run the actual app. `gosu` is preferred over `su` /
-# `sudo` because it cleans up the process tree (no extra shell layer)
-# so signals (SIGTERM from `docker stop`) reach uvicorn directly.
-exec gosu "$PUID:$PGID" "$@"
+# ── Dual-process mode (Go + Python) or legacy single-process ──────────
+# When CMD is "odysseus", start the Go binary as the public-facing
+# server on :7000 and Python (uvicorn) as the internal ML worker on
+# :7001. Go serves static files and proxies API requests to Python.
+#
+# When CMD is "uvicorn ..." (legacy or explicit override), run Python
+# directly on :7000 as before — no Go binary involved.
+
+if [ "$1" = "odysseus" ]; then
+    # Shared token for internal-tool calls (file-based so both read it).
+    python -c 'import secrets; print(secrets.token_hex(32))' > /app/data/.internal_token
+    chown "$PUID:$PGID" /app/data/.internal_token
+
+    # Start Python ML worker on :7001 (loopback only, not exposed).
+    # Phase 2+: Go owns auth at the public :7000 boundary. Python on
+    # :7001 is loopback-only, so we disable its auth middleware via an
+    # inline env override. This does NOT export AUTH_ENABLED globally —
+    # Go must still see the real AUTH_ENABLED value from docker-compose.
+    AUTH_ENABLED=false gosu "$PUID:$PGID" uvicorn app:app --host 127.0.0.1 --port 7001 &
+    PYTHON_PID=$!
+
+    # Wait for Python to be ready before starting Go.
+    echo "Waiting for Python worker on :7001..."
+    for i in $(seq 1 30); do
+        if curl -sf http://127.0.0.1:7001/api/health >/dev/null 2>&1; then
+            echo "Python worker ready."
+            break
+        fi
+        sleep 1
+    done
+
+    # Start Go server on :7000 (public). Sets ODYSSEUS_PYTHON_ADDR
+    # so the Go proxy knows where to forward API requests.
+    # Also sets ODYSSEUS_INTERNAL_BASE so Python agent loopback calls
+    # route through Go (needed once Go owns auth in Phase 2+).
+    export ODYSSEUS_PYTHON_ADDR="http://127.0.0.1:7001"
+    export ODYSSEUS_INTERNAL_BASE="http://127.0.0.1:7000"
+    gosu "$PUID:$PGID" /usr/local/bin/odysseus &
+    GO_PID=$!
+
+    # Trap SIGTERM/SIGINT to stop both processes on container shutdown.
+    trap 'kill $PYTHON_PID $GO_PID 2>/dev/null' TERM INT
+
+    # Wait for either process to exit (POSIX-compatible, no `wait -n`).
+    # Poll both PIDs — when one dies, kill the other and exit.
+    while kill -0 $PYTHON_PID 2>/dev/null && kill -0 $GO_PID 2>/dev/null; do
+        wait $PYTHON_PID $GO_PID 2>/dev/null || break
+    done
+    kill $PYTHON_PID $GO_PID 2>/dev/null
+    wait $PYTHON_PID 2>/dev/null
+    wait $GO_PID 2>/dev/null
+    exit 0
+else
+    # Legacy mode: run whatever CMD was passed (e.g. uvicorn) directly.
+    exec gosu "$PUID:$PGID" "$@"
+fi

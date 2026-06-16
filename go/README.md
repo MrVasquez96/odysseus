@@ -1,0 +1,182 @@
+# Odysseus-Go Migration
+
+Go core for the Odysseus self-hosted AI workspace. Converts the Python web layer to Go while keeping the frontend and ML-bound Python code.
+
+## Status: Phase 2 Complete (2026-06-15)
+
+### What exists
+
+**Phase 0 — Baseline captured:**
+- Route manifest: **471 routes** (189 GET, 210 POST, 40 DELETE, 22 PUT, 10 PATCH), **7 SSE endpoints** → `go/testdata/route_manifest.json`
+- Env var contract: 45+ variables documented with defaults, sources, and which Go phase owns them → `go/testdata/env_contract.json`
+- Fixture capture script ready (needs live server) → `go/scripts/capture_fixtures.py`
+- Route capture script → `go/scripts/capture_routes.py` (run inside Docker: `docker cp` then `docker exec -w /app`)
+
+**Phase 1 — Go binary built and smoke-tested:**
+
+| File | Purpose |
+|------|---------|
+| `go/cmd/odysseus/main.go` | Entry point, `//go:embed static`, signal handling, graceful shutdown |
+| `go/internal/config/config.go` | Env var loader honoring Odysseus contract (`APP_BIND`, `APP_PORT`, etc.) |
+| `go/internal/proxy/proxy.go` | Reverse proxy to Python with `FlushInterval=-1` for SSE streaming |
+| `go/internal/server/server.go` | HTTP mux: SPA routes + `/static/` + auth routes + catch-all proxy to Python |
+| `go/internal/server/static.go` | Embedded FS serving, CSP nonce injection (`{{CSP_NONCE}}`), `Cache-Control: no-cache` on `.js/.css/.html` |
+| `go/internal/server/middleware.go` | Security headers (CSP, X-Frame-Options, HSTS, Permissions-Policy), gzip (1024 min, level 6, excludes SSE), request timeout (45s, SSE-exempt) |
+
+**Phase 2 — Auth, sessions, middleware (2026-06-15):**
+
+| File | Purpose |
+|------|---------|
+| `go/internal/auth/auth.go` | AuthManager: bcrypt passwords, JSON user store (`data/auth.json`), user CRUD, privileges, migrations |
+| `go/internal/auth/sessions.go` | Session tokens: 64-char hex, 7-day TTL, stored in `data/sessions.json`, thread-safe |
+| `go/internal/auth/totp.go` | TOTP 2FA: RFC 6238 implementation, backup codes, provisioning URIs |
+| `go/internal/routes/auth.go` | Auth route handlers: login, logout, signup, setup, change-password, 2FA, admin user mgmt, rate limiting |
+| `go/internal/routes/zxcvbn.go` | Password scoring via `github.com/nbutton23/zxcvbn-go` (new capability from goWebCtrl) |
+| `go/internal/server/auth_middleware.go` | Auth middleware: cookie validation, internal token bypass, localhost bypass, CORS preflight, exempt paths |
+
+**Auth route coverage:**
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/auth/setup` | POST | First-run admin account creation |
+| `/api/auth/signup` | POST | User self-registration (when enabled) |
+| `/api/auth/login` | POST | Login with password + optional TOTP |
+| `/api/auth/logout` | POST | Logout (revoke session) |
+| `/api/auth/status` | GET | Auth state for frontend |
+| `/api/auth/change-password` | POST | Password change (revokes other sessions) |
+| `/api/auth/2fa/setup` | POST | Generate TOTP secret |
+| `/api/auth/2fa/confirm` | POST | Confirm TOTP setup (returns backup codes) |
+| `/api/auth/2fa/disable` | POST | Disable 2FA (requires password) |
+| `/api/auth/2fa/status` | GET | Check 2FA status |
+| `/api/auth/users` | GET | List users (admin) |
+| `/api/auth/users` | POST | Create user (admin) |
+| `/api/auth/users` | DELETE | Delete user (admin) |
+| `/api/auth/users/{username}/privileges` | PUT | Update user privileges (admin) |
+| `/api/auth/users/{username}/rename` | PUT | Rename user (admin) |
+| `/api/auth/signup-toggle` | POST | Toggle signup (admin, deprecated) |
+| `/api/auth/open-signup` | PUT | Set signup enabled (admin) |
+| `/api/auth/password-score` | POST | zxcvbn password strength scoring |
+
+**Dependencies added in Phase 2:**
+- `golang.org/x/crypto/bcrypt` — password hashing
+- `github.com/nbutton23/zxcvbn-go` — password strength scoring (from goWebCtrl)
+
+**Binary:** 21MB statically linked, `go vet ./...` clean.
+
+### Architecture
+
+```
+Browser ──► Go binary :7000
+             //go:embed static/
+             security headers, gzip, timeout middleware
+             AUTH MIDDLEWARE (cookie, internal token, localhost bypass)
+             auth routes (/api/auth/*)
+             SPA routes (/, /notes, /calendar, /cookbook, /email, /memory, /gallery, /tasks, /library)
+             /static/* from embedded FS
+             everything else → reverse proxy
+                 │
+                 │ localhost HTTP (FlushInterval=-1 for SSE)
+                 │ + X-Odysseus-Internal-Token (shared token)
+                 │ + X-Odysseus-Owner (authenticated username)
+                 ▼
+            Python backend :7001 (internal)
+             FastAPI (auth middleware still runs, but trusts Go's
+             internal-tool token for proxied requests)
+```
+
+### Auth handoff: Go → Python
+
+Go owns all authentication at the public :7000 boundary. When Go proxies a request to Python:
+
+1. **Shared internal token** (`ODYSSEUS_INTERNAL_TOKEN`): generated by entrypoint.sh, read by both Go and Python
+2. **Go strips `X-Forwarded-For/Host/Proto`** from proxied requests so Python's `_is_trusted_loopback()` sees them as genuine loopback
+3. **Go injects `X-Odysseus-Internal-Token` + `X-Odysseus-Owner`** on every proxied request
+4. **Python's auth middleware** sees the internal token + loopback and grants access via the existing internal-tool bypass, setting `request.state.current_user` from the owner header
+5. **Bearer tokens** (`ody_` prefix) are still passed through to Python for validation until Go owns the ApiToken DB table (Phase 3)
+
+### Building
+
+```bash
+cd go/
+
+# Build (copies static/ into Go source tree, then compiles)
+make build
+
+# Dev mode (Python must be running on :7001 separately)
+make dev
+
+# Run route capture (inside Docker container)
+docker cp go/scripts/capture_routes.py odysseus-odysseus-1:/tmp/capture_routes.py
+docker exec -w /app odysseus-odysseus-1 python /tmp/capture_routes.py 2>/dev/null > go/testdata/route_manifest.json
+
+# Run golden fixture capture (needs live server on :7000)
+python go/scripts/capture_fixtures.py
+```
+
+**Note:** `//go:embed` can't follow symlinks, so `make build` uses `rsync` to copy `static/` into `go/cmd/odysseus/static/` (gitignored). Rebuild after frontend changes.
+
+### Key design decisions
+
+- **Two-process auth**: Go validates sessions at the edge; Python trusts Go via shared internal token. No double-authentication overhead.
+- **`FlushInterval = -1`** on the reverse proxy — mandatory for SSE. The frontend uses `fetch()` + `ReadableStream.getReader()` (NOT `EventSource`), so the proxy must flush every write immediately and preserve `\n\n` framing.
+- **CSP nonce threading** — middleware generates a per-request nonce, stores it in `context.Context`, the static handler reads it to inject into HTML `{{CSP_NONCE}}` placeholders, and the security headers middleware uses the same nonce for the `Content-Security-Policy` header.
+- **Request timeout exemptions** — SSE prefixes (`/api/chat`, `/api/shell/stream`, `/api/research`, `/api/model/probe`, etc.) are exempt from the 45s hard timeout.
+- **TOTP from stdlib** — RFC 6238 implementation using only `crypto/hmac`, `crypto/sha1`, `encoding/base32` (no external TOTP library). Matches pyotp behavior exactly.
+- **Rate limiting** — per-IP sliding window for login (15/min), signup (3/5min), setup (3/5min).
+- **Cookie-compatible** — same cookie name (`odysseus_session`), same token format (64-char hex), same TTL (7 days). Existing sessions won't survive the cutover (different session stores), but re-login is seamless.
+
+### SSE endpoints (must stream correctly through proxy)
+
+```
+/api/chat_stream           — main chat streaming
+/api/chat/resume/{id}      — reconnect to detached agent run
+/api/rewrite               — rewrite last message
+/api/shell/stream           — shell command execution
+/api/probe                 — model endpoint probe
+/api/model-endpoints/{id}/probe
+/api/research/stream/{id}  — deep research progress
+```
+
+---
+
+## Next: Phase 3 — Database + CRUD Routes
+
+### Goal
+Go owns SQLite reads/writes for all non-ML tables.
+
+### What to do
+
+1. **Add `mattn/go-sqlite3`** to go.mod (CGO_ENABLED=1, Dockerfile needs gcc in build stage)
+2. **Create Go models** matching `core/database.py` schema exactly
+3. **Port pure-CRUD routes**: sessions, messages, documents, notes/tasks, presets, settings, gallery
+4. **Port bearer token auth** to Go (ApiToken table now accessible)
+5. **Use WAL mode** for concurrent Go+Python access during transition
+
+### Verification
+- CRUD round-trips match Python; no schema drift
+- Go and Python can both read `app.db` safely (WAL mode)
+- Bearer token auth works end-to-end from Go
+
+---
+
+## Full migration plan
+
+See `First_plan.md` at the repo root and `~/.claude/plans/keen-floating-elephant.md` for the detailed implementation plan covering all phases:
+
+- Phase 0: Baseline & safety net (done)
+- Phase 1: Go proxy + embedded frontend (done)
+- Phase 2: Auth, sessions, middleware (done)
+- **Phase 3: Database + CRUD routes (next)** — mattn/go-sqlite3
+- Phase 4: Email, calendar, scheduler, notifications
+- Phase 5: LLM client + chat streaming (reuse Friday/llm)
+- Phase 6: Python ML worker + hybrid agent (Go agent core + Python MCP/skills)
+- Feature phases: LiveKit voice, agent personalities, memory bubbles, user access control, Docker management, Cloudflare tunnel, Telegram, SSH monitoring
+
+### Key constraints
+- No API drift — frontend contract frozen during conversion
+- SSE streaming must be byte-identical through the proxy
+- SQLite WAL mode during Go+Python overlap (Phase 3)
+- Don't reimplement ML in Go — embeddings/Chroma/whisper stay in Python worker
+- AGPL-3.0 license (goWebCtrl MIT merges in)
+- Friday agent code is **copied** into Go codebase (not submodule)
+- Agent strategy: **hybrid** — Go agent core for orchestration, Python worker for MCP/skills/ML

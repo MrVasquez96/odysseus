@@ -1,0 +1,3 @@
+# Embedded static files — copied from repo root at build time.
+# Do not commit: they are a build artifact.
+static/
