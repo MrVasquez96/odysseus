@@ -34,3 +34,23 @@ PyMuPDF
 # [all]/Azure/audio extras (cloud + heavy). Pinned to a release >30 days old per
 # the dependency-age discussion in issue #485.
 markitdown[docx,pptx,xlsx,xls]==0.1.5
+
+# Real-time voice chat via LiveKit.
+# Install if you want live voice conversations in the chat interface.
+# Requires a LiveKit server (see docker-compose.yml).
+#
+# Default mode (local / self-hosted):
+#   Uses any OpenAI-compatible LLM endpoint (Ollama, vLLM, llama.cpp),
+#   Silero VAD for voice activity detection, and optionally a local
+#   TTS endpoint. Set VOICE_LLM_ENDPOINT, VOICE_TTS_ENDPOINT, etc.
+#
+# Google mode (cloud):
+#   Set VOICE_MODE=google and GOOGLE_API_KEY for Gemini native audio.
+#   Also install: livekit-agents[google]
+livekit
+livekit-agents
+livekit-plugins-openai
+livekit-plugins-silero
+httpx
+# Optional Google Gemini native audio support (cloud):
+# livekit-agents[google]
