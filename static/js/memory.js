@@ -1361,6 +1361,86 @@ async function handleImportFile(file) {
 var showToast = uiModule.showToast;
 var showError = uiModule.showError;
 
+// ── Bubble graph helpers ──
+let _bubbleMod = null;
+let _graphVisible = false;
+
+async function _showBubbleGraph() {
+  const overlay = document.getElementById('memory-graph-overlay');
+  const canvas = document.getElementById('memory-graph-canvas');
+  const toggleBtn = document.getElementById('memory-graph-toggle');
+  if (!overlay || !canvas) return;
+
+  _graphVisible = true;
+  overlay.classList.remove('hidden');
+  if (toggleBtn) toggleBtn.classList.add('active');
+
+  const status = document.getElementById('memory-graph-status');
+  const backBtn = document.getElementById('memory-graph-back');
+  const closeBtn = document.getElementById('memory-graph-close');
+
+  if (!_bubbleMod) {
+    if (status) status.textContent = 'Loading…';
+    _bubbleMod = await import('./memoryBubble.js');
+  }
+
+  // Size canvas to fill the overlay below the header
+  const header = overlay.querySelector('.memory-graph-overlay-header');
+  const headerH = header ? header.offsetHeight : 0;
+  canvas.width = overlay.clientWidth;
+  canvas.height = overlay.clientHeight - headerH;
+
+  _bubbleMod.initBubbleView(canvas, {
+    onLeafClick: (node) => {
+      if (node.id && node.id.startsWith('mem:')) {
+        const memId = node.id.slice(4);
+        _hideBubbleGraph();
+        setTimeout(() => {
+          const el = document.querySelector(`[data-memory-id="${memId}"]`);
+          if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('memory-flash'); setTimeout(() => el.classList.remove('memory-flash'), 1500); }
+        }, 150);
+      }
+    },
+    onDepthChange: (depth) => {
+      if (backBtn) backBtn.style.visibility = depth > 0 ? 'visible' : 'hidden';
+    }
+  });
+
+  if (backBtn && !backBtn.dataset.wired) {
+    backBtn.dataset.wired = '1';
+    backBtn.addEventListener('click', () => { if (_bubbleMod) _bubbleMod.bubbleBack(); });
+  }
+
+  if (closeBtn && !closeBtn.dataset.wired) {
+    closeBtn.dataset.wired = '1';
+    closeBtn.addEventListener('click', _hideBubbleGraph);
+  }
+
+  if (status) status.textContent = 'Fetching…';
+  try {
+    const data = await _bubbleMod.loadBubbleGraph();
+    const leafCount = data.nodes ? data.nodes.filter(n => n.group === 'mem_leaf').length : 0;
+    if (status) status.textContent = leafCount + ' memories';
+  } catch (e) {
+    console.error('Bubble graph load failed:', e);
+    if (status) status.textContent = 'Failed to load';
+  }
+}
+
+function _hideBubbleGraph() {
+  _graphVisible = false;
+  if (_bubbleMod) _bubbleMod.destroyBubbleView();
+  const overlay = document.getElementById('memory-graph-overlay');
+  const toggleBtn = document.getElementById('memory-graph-toggle');
+  if (overlay) overlay.classList.add('hidden');
+  if (toggleBtn) toggleBtn.classList.remove('active');
+}
+
+function _toggleBubbleGraph() {
+  if (_graphVisible) _hideBubbleGraph();
+  else _showBubbleGraph();
+}
+
 // Event listeners
 document.addEventListener('DOMContentLoaded', () => {
   _wireMemoryDrag();
@@ -1377,8 +1457,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (target === 'skills') {
         import('./skills.js').then(m => { if (m.loadSkills) m.loadSkills(true); else if (m.default?.loadSkills) m.default.loadSkills(true); });
       }
+      // Hide graph when switching away from browse tab
+      if (target !== 'browse' && _graphVisible) {
+        _hideBubbleGraph();
+      }
     });
   });
+
+  // Graph toggle button
+  const graphToggle = document.getElementById('memory-graph-toggle');
+  if (graphToggle) {
+    graphToggle.addEventListener('click', _toggleBubbleGraph);
+  }
 
   const sortSelect = document.getElementById('memory-sort');
   if (sortSelect) {

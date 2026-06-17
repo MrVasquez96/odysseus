@@ -273,6 +273,7 @@
                 </select>
                 <button id="memory-select-btn" class="memory-toolbar-btn" title="Select multiple memories">Select</button>
                 <button id="memory-tidy-btn" class="memory-toolbar-btn" title="AI tidy: deduplicate and clean up memories"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-1px;margin-right:2px;"><path d="M12 0L14.59 8.41L23 12L14.59 15.59L12 24L9.41 15.59L1 12L9.41 8.41Z"/></svg> Tidy</button>
+                <button id="memory-graph-toggle" class="memory-toolbar-btn" title="Toggle graph view"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:2px;"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="5" r="1.5"/><circle cx="20" cy="5" r="1.5"/><circle cx="4" cy="19" r="1.5"/><circle cx="20" cy="19" r="1.5"/><line x1="9.5" y1="9.5" x2="5.5" y2="6.5"/><line x1="14.5" y1="9.5" x2="18.5" y2="6.5"/><line x1="9.5" y1="14.5" x2="5.5" y2="17.5"/><line x1="14.5" y1="14.5" x2="18.5" y2="17.5"/></svg> Graph</button>
               </div>
               <input type="text" id="memory-search" placeholder="Search memories…" class="memory-search-input" aria-label="Search memories" />
               <div id="memory-category-filters" class="memory-category-filters">
@@ -289,6 +290,7 @@
             <div id="memory-suggestions-body" class="memory-suggestions hidden"></div>
           </div>
         </div>
+    
         <!-- ── Add tab ── -->
         <div class="memory-tab-panel hidden" data-memory-panel="add">
           <div class="admin-card">
@@ -2232,6 +2234,30 @@
         <!-- ═══ SYSTEM TAB ═══ -->
         <div data-settings-panel="system" class="hidden">
 
+          <!-- Cloudflare Tunnel -->
+          <div class="admin-card" id="tunnel-card">
+            <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>Cloudflare Tunnel</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:8px">
+              Expose Odysseus to the internet via a free Cloudflare Quick Tunnel. Generates a random <code>*.trycloudflare.com</code> URL. Requires <code>cloudflared</code> installed on the host.
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span id="tunnel-status-dot" class="tunnel-status-dot"></span>
+              <span id="tunnel-status-text" style="font-size:12px;opacity:0.7;">Checking…</span>
+              <a id="tunnel-public-url" href="#" target="_blank" rel="noopener" style="display:none;font-size:12px;word-break:break-all;"></a>
+            </div>
+            <div id="tunnel-start-form" style="margin-top:10px;">
+              <div class="admin-toggle-sub" style="margin-bottom:6px;">
+                Enter your account password to enable the tunnel. A password strength score of 3/4 or higher is required for security.
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <input type="password" id="tunnel-password" placeholder="Account password" class="admin-input" style="max-width:220px;" />
+                <button class="admin-btn-add" id="tunnel-start-btn">Start Tunnel</button>
+                <button class="admin-btn-delete" id="tunnel-stop-btn" style="display:none;">Stop Tunnel</button>
+              </div>
+              <div id="tunnel-feedback" style="margin-top:6px;font-size:12px;"></div>
+            </div>
+          </div>
+
           <div class="admin-card">
             <h2><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px;opacity:0.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Data Backup</h2>
             <div class="admin-toggle-sub" style="margin-bottom:8px">Export or import your user data (memories, presets, settings, skills, preferences) as a JSON file.</div>
@@ -2344,6 +2370,7 @@
 <script type="module" src="/static/js/tourAutoplay.js"></script>
 <script type="module" src="/static/js/fileHandler.js"></script>
 <script type="module" src="/static/js/voiceRecorder.js"></script>
+<script type="module" src="/static/js/voiceChat.js"></script>
 <script type="module" src="/static/js/models.js"></script>  <!-- This must come BEFORE app.js -->
 <script type="module" src="/static/js/rag.js"></script>
 <script type="module" src="/static/js/presets.js"></script>
@@ -2366,6 +2393,17 @@
 <script type="module" src="/static/js/admin.js"></script>
 <script type="module" src="/static/js/assistant.js"></script>
 <script type="module" src="/static/app.js"></script>  <!-- app.js must be LAST -->
+<!-- Memory Graph Overlay -->
+<div id="memory-graph-overlay" class="memory-graph-overlay hidden">
+  <div class="memory-graph-overlay-header">
+    <button id="memory-graph-back" class="memory-toolbar-btn" style="visibility:hidden;" title="Back">&larr; Back</button>
+    <span id="memory-graph-breadcrumb" style="opacity:0.6;font-size:12px;"></span>
+    <span style="flex:1"></span>
+    <span id="memory-graph-status" style="opacity:0.5;font-size:11px;"></span>
+    <button id="memory-graph-close" class="memory-toolbar-btn" title="Close graph">&times; Close</button>
+  </div>
+  <canvas id="memory-graph-canvas"></canvas>
+</div>
 <script type="module" src="/static/js/init.js"></script>
 <script type="module" src="/static/js/a11y.js"></script>
 <script nonce="{{CSP_NONCE}}">if('serviceWorker' in navigator){navigator.serviceWorker.register('/static/sw.js').catch(()=>{});}</script>

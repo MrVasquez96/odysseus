@@ -10127,6 +10127,72 @@ details a:hover {
 #memory-modal .memory-tab-panel[data-memory-panel].hidden {
   display: none;
 }
+/* ── Graph tab ── */
+.memory-graph-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+.memory-graph-overlay.hidden { display: none; }
+.memory-graph-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+#memory-graph-canvas {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  cursor: grab;
+}
+#memory-graph-canvas:active { cursor: grabbing; }
+#memory-graph-toggle.active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+  max-height: 78vh;
+  height: min(78vh, max-content);
+  overflow: hidden;
+}
+#memory-modal .memory-modal-content:has(
+  .memory-tab-panel[data-memory-panel="graph"]:not(.hidden)
+) .modal-header,
+#memory-modal .memory-modal-content:has(
+  .memory-tab-panel[data-memory-panel="graph"]:not(.hidden)
+) .memory-tabs {
+  flex: 0 0 auto;
+}
+#memory-modal .memory-modal-content:has(
+  .memory-tab-panel[data-memory-panel="graph"]:not(.hidden)
+) .memory-modal-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+#memory-modal .memory-tab-panel[data-memory-panel="graph"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+/* Flash highlight when navigating from graph to list */
+@keyframes memory-flash-anim {
+  0%   { background: color-mix(in srgb, var(--red) 30%, transparent); }
+  100% { background: transparent; }
+}
+.memory-flash {
+  animation: memory-flash-anim 1.5s ease-out;
+}
 /* Settings cards dim + mute when their toggle is OFF (matches the
    .memory-toolbar-toggle "off" treatment elsewhere). */
 #memory-modal .memory-tab-panel[data-memory-panel="settings"] .admin-card {
@@ -36651,3 +36717,141 @@ body.theme-frosted .modal {
   border-top: 1px solid var(--border);
 }
 .workspace-note { margin: 0 0 8px; font-size: 11px; line-height: 1.4; }
+
+/* ── Voice Chat ─────────────────────────────────────────────────── */
+.voice-chat-btn.active {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+.voice-chat-btn.connecting {
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.voice-control-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: color-mix(in srgb, var(--red) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--red) 20%, var(--border));
+  border-radius: 10px;
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+.voice-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  flex-shrink: 0;
+  animation: voice-dot-pulse 1.5s ease-in-out infinite;
+}
+@keyframes voice-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+.voice-status-text {
+  opacity: 0.8;
+  flex: 1;
+}
+.voice-ctrl-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+.voice-ctrl-btn:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+.voice-ctrl-btn.muted {
+  color: var(--red);
+  border-color: var(--red);
+}
+.voice-disconnect-btn:hover {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+  border-color: var(--red);
+  color: var(--red);
+}
+/* Voice status dot — speaking animation */
+.voice-status-dot.speaking {
+  background: #22c55e;
+  animation: voice-speaking-pulse 0.6s ease-in-out infinite;
+}
+@keyframes voice-speaking-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 #22c55e80; }
+  50% { opacity: 0.9; transform: scale(1.3); box-shadow: 0 0 8px 2px #22c55e60; }
+}
+
+/* Voice live transcript bubbles in chat */
+.voice-transcript-bubble {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 2px 0;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: opacity 0.15s ease;
+  max-width: 85%;
+}
+.voice-transcript-user {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  margin-left: auto;
+  flex-direction: row-reverse;
+  text-align: right;
+}
+.voice-transcript-assistant {
+  background: color-mix(in srgb, var(--red) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--red) 15%, var(--border));
+  margin-right: auto;
+}
+.voice-transcript-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.6;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.voice-transcript-content {
+  flex: 1;
+}
+.voice-transcript-final {
+  opacity: 1 !important;
+}
+
+/* ── Tunnel Status ───────────────────────────────────────────────── */
+.tunnel-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  flex-shrink: 0;
+  display: inline-block;
+}
+.tunnel-status-dot.active {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e80;
+}
+
+.voice-transcript-badge {
+  display: inline-block;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+  color: var(--red);
+  margin-left: 6px;
+  vertical-align: middle;
+}

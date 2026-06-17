@@ -2489,11 +2489,116 @@ function initDangerZone() {
 }
 
 /* ═══════════════════════════════════════════
+   CLOUDFLARE TUNNEL
+   ═══════════════════════════════════════════ */
+let _tunnelPollTimer = null;
+
+function initTunnel() {
+  const startBtn = el('tunnel-start-btn');
+  const stopBtn = el('tunnel-stop-btn');
+  const pwInput = el('tunnel-password');
+  const feedback = el('tunnel-feedback');
+  if (!startBtn) return;
+
+  startBtn.addEventListener('click', async () => {
+    const pw = pwInput?.value;
+    if (!pw) {
+      if (feedback) { feedback.textContent = 'Enter your password.'; feedback.style.color = 'var(--red)'; }
+      return;
+    }
+    startBtn.disabled = true;
+    if (feedback) { feedback.textContent = 'Starting tunnel…'; feedback.style.color = ''; }
+    try {
+      const res = await fetch('/api/tunnel/start', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pw }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const msg = data.error || 'Failed to start tunnel';
+        if (feedback) { feedback.textContent = msg; feedback.style.color = 'var(--red)'; }
+        if (data.score !== undefined) {
+          feedback.textContent += ` (score: ${data.score}/4, need 3+)`;
+        }
+      } else {
+        if (feedback) { feedback.textContent = 'Tunnel starting… polling for URL.'; feedback.style.color = ''; }
+        _startTunnelPoll();
+      }
+    } catch (e) {
+      if (feedback) { feedback.textContent = 'Network error: ' + e.message; feedback.style.color = 'var(--red)'; }
+    } finally {
+      startBtn.disabled = false;
+    }
+  });
+
+  stopBtn?.addEventListener('click', async () => {
+    stopBtn.disabled = true;
+    try {
+      await fetch('/api/tunnel/stop', { method: 'POST', credentials: 'same-origin' });
+    } catch {}
+    stopBtn.disabled = false;
+    _refreshTunnelStatus();
+  });
+
+  _refreshTunnelStatus();
+}
+
+function _startTunnelPoll() {
+  if (_tunnelPollTimer) clearInterval(_tunnelPollTimer);
+  _tunnelPollTimer = setInterval(async () => {
+    const status = await _refreshTunnelStatus();
+    if (status && (status.running || status.error)) {
+      clearInterval(_tunnelPollTimer);
+      _tunnelPollTimer = null;
+    }
+  }, 2000);
+  // Stop polling after 90s regardless
+  setTimeout(() => { if (_tunnelPollTimer) { clearInterval(_tunnelPollTimer); _tunnelPollTimer = null; } }, 90000);
+}
+
+async function _refreshTunnelStatus() {
+  const dot = el('tunnel-status-dot');
+  const text = el('tunnel-status-text');
+  const urlEl = el('tunnel-public-url');
+  const startBtn = el('tunnel-start-btn');
+  const stopBtn = el('tunnel-stop-btn');
+  const feedback = el('tunnel-feedback');
+  try {
+    const res = await fetch('/api/tunnel/status', { credentials: 'same-origin' });
+    if (!res.ok) {
+      if (text) text.textContent = 'Tunnel API unavailable';
+      return null;
+    }
+    const data = await res.json();
+    if (data.running) {
+      if (dot) { dot.className = 'tunnel-status-dot active'; }
+      if (text) text.textContent = 'Active';
+      if (urlEl) { urlEl.href = data.public_url; urlEl.textContent = data.public_url; urlEl.style.display = ''; }
+      if (startBtn) startBtn.style.display = 'none';
+      if (stopBtn) stopBtn.style.display = '';
+      if (feedback) { feedback.textContent = ''; }
+    } else {
+      if (dot) { dot.className = 'tunnel-status-dot'; }
+      if (text) text.textContent = data.error ? 'Error: ' + data.error : 'Stopped';
+      if (urlEl) urlEl.style.display = 'none';
+      if (startBtn) startBtn.style.display = '';
+      if (stopBtn) stopBtn.style.display = 'none';
+    }
+    return data;
+  } catch {
+    if (text) text.textContent = 'Cannot reach tunnel API';
+    return null;
+  }
+}
+
+/* ═══════════════════════════════════════════
    INIT & REFRESH
    ═══════════════════════════════════════════ */
 function initAll() {
   modalEl = el('settings-modal');
-  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTokenForm, () => settingsModule.initIntegrations()];
+  const inits = [initSignupToggle, initAddUser, initEndpointForm, initMcpForm, initCalDAV, initBackup, initDangerZone, initTokenForm, initTunnel, () => settingsModule.initIntegrations()];
   for (const fn of inits) {
     try { fn(); } catch (e) { console.error('Admin init error in', fn.name || 'anonymous', e); }
   }
