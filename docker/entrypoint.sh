@@ -125,17 +125,46 @@ if [ "$1" = "odysseus" ]; then
     gosu "$PUID:$PGID" /usr/local/bin/odysseus &
     GO_PID=$!
 
-    # Trap SIGTERM/SIGINT to stop both processes on container shutdown.
-    trap 'kill $PYTHON_PID $GO_PID 2>/dev/null' TERM INT
+    # ── Optional: LiveKit voice agent ───────────────────────────────
+    # Start the Python voice agent if enabled and LiveKit deps are installed.
+    VOICE_PID=""
+    if [ "${VOICE_AGENT_ENABLED:-false}" = "true" ]; then
+        if python -c "import livekit; import livekit.agents" 2>/dev/null; then
+            echo "Starting voice agent (LiveKit)..."
+            LIVEKIT_URL="${LIVEKIT_URL:-ws://livekit:7880}" \
+            LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-devkey}" \
+            LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-devsecret1234567890abcdef1234567890abcdef}" \
+            VOICE_MODE="${VOICE_MODE:-local}" \
+            VOICE_LLM_ENDPOINT="${VOICE_LLM_ENDPOINT:-}" \
+            VOICE_LLM_MODEL="${VOICE_LLM_MODEL:-}" \
+            VOICE_LLM_API_KEY="${VOICE_LLM_API_KEY:-not-needed}" \
+            VOICE_STT_ENDPOINT="${VOICE_STT_ENDPOINT:-http://whisper:8000/v1}" \
+            VOICE_TTS_ENDPOINT="${VOICE_TTS_ENDPOINT:-http://openedai-speech:8000/v1}" \
+            VOICE_TTS_MODEL="${VOICE_TTS_MODEL:-tts-1}" \
+            VOICE_TTS_VOICE="${VOICE_TTS_VOICE:-alloy}" \
+            GOOGLE_API_KEY="${GOOGLE_API_KEY:-}" \
+            OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-}" \
+            INTERNAL_TOKEN_PATH="/app/data/.internal_token" \
+            gosu "$PUID:$PGID" python /app/services/voice/agent.py start &
+            VOICE_PID=$!
+        else
+            echo "VOICE_AGENT_ENABLED=true but livekit not installed — skipping voice agent."
+            echo "Install with: pip install livekit livekit-agents[google] httpx"
+        fi
+    fi
 
-    # Wait for either process to exit (POSIX-compatible, no `wait -n`).
+    # Trap SIGTERM/SIGINT to stop all processes on container shutdown.
+    trap 'kill $PYTHON_PID $GO_PID $VOICE_PID 2>/dev/null' TERM INT
+
+    # Wait for either core process to exit (POSIX-compatible, no `wait -n`).
     # Poll both PIDs — when one dies, kill the other and exit.
     while kill -0 $PYTHON_PID 2>/dev/null && kill -0 $GO_PID 2>/dev/null; do
         wait $PYTHON_PID $GO_PID 2>/dev/null || break
     done
-    kill $PYTHON_PID $GO_PID 2>/dev/null
+    kill $PYTHON_PID $GO_PID $VOICE_PID 2>/dev/null
     wait $PYTHON_PID 2>/dev/null
     wait $GO_PID 2>/dev/null
+    [ -n "$VOICE_PID" ] && wait $VOICE_PID 2>/dev/null
     exit 0
 else
     # Legacy mode: run whatever CMD was passed (e.g. uvicorn) directly.

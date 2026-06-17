@@ -11,7 +11,10 @@
 # for setup details.
 services:
   odysseus:
-    build: .
+    build:
+      context: .
+      args:
+        INSTALL_OPTIONAL: "true"
     ports:
       - "${APP_BIND:-0.0.0.0}:${APP_PORT:-7000}:7000"
     volumes:
@@ -64,6 +67,19 @@ services:
       - GOOGLE_PSE_CX=${GOOGLE_PSE_CX:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
       - SERPER_API_KEY=${SERPER_API_KEY:-}
+      - LIVEKIT_URL=${LIVEKIT_URL:-ws://livekit:7880}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-devkey}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-devsecret1234567890abcdef1234567890abcdef}
+      - LIVEKIT_PUBLIC_URL=${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
+      - VOICE_AGENT_ENABLED=${VOICE_AGENT_ENABLED:-true}
+      - VOICE_MODE=${VOICE_MODE:-local}
+      - VOICE_LLM_ENDPOINT=${VOICE_LLM_ENDPOINT:-}
+      - VOICE_LLM_MODEL=${VOICE_LLM_MODEL:-}
+      - VOICE_LLM_API_KEY=${VOICE_LLM_API_KEY:-not-needed}
+      - VOICE_STT_ENDPOINT=${VOICE_STT_ENDPOINT:-http://whisper:8000/v1}
+      - VOICE_TTS_ENDPOINT=${VOICE_TTS_ENDPOINT:-http://openedai-speech:8000/v1}
+      - VOICE_TTS_MODEL=${VOICE_TTS_MODEL:-tts-1}
+      - VOICE_TTS_VOICE=${VOICE_TTS_VOICE:-alloy}
       # PUID / PGID — the user/group the container drops to before
       # running uvicorn (entrypoint also chowns /app/data + /app/logs
       # to match, so bind-mounted files stay editable from the host).
@@ -163,7 +179,52 @@ services:
       - NTFY_BASE_URL=${NTFY_BASE_URL:-http://localhost:8091}
     restart: unless-stopped
 
+  livekit:
+    image: livekit/livekit-server:latest
+    ports:
+      - "${LIVEKIT_BIND:-0.0.0.0}:7880:7880"
+      - "${LIVEKIT_BIND:-0.0.0.0}:7881:7881/tcp"
+      - "${LIVEKIT_BIND:-0.0.0.0}:7882:7882/udp"
+    environment:
+      - "LIVEKIT_KEYS=${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret1234567890abcdef1234567890abcdef}"
+    volumes:
+      - ./config/livekit.yaml:/etc/livekit.yaml:ro,z
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+
+  # Local TTS server for voice chat (OpenAI-compatible API).
+  # Uses Piper/Kokoro models — runs on CPU, no API keys needed.
+  # The odysseus voice agent talks to this at http://openedai-speech:8000/v1.
+  openedai-speech:
+    image: ghcr.io/matatonic/openedai-speech:latest
+    ports:
+      - "${TTS_BIND:-127.0.0.1}:8099:8000"
+    volumes:
+      - tts-voices:/app/voices
+      - tts-config:/app/config
+    environment:
+      - TTS_HOME=/app/voices
+      - HF_HOME=/app/voices
+    restart: unless-stopped
+
+  # Local STT server for voice chat (OpenAI-compatible Whisper API).
+  # Runs faster-whisper on CPU (or GPU if available), no API keys needed.
+  # The odysseus voice agent talks to this at http://whisper:8000/v1.
+  whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    ports:
+      - "${STT_BIND:-127.0.0.1}:8098:8000"
+    volumes:
+      - whisper-models:/root/.cache
+    environment:
+      - WHISPER__MODEL=Systran/faster-whisper-small
+      - WHISPER__INFERENCE_DEVICE=cpu
+    restart: unless-stopped
+
 volumes:
   searxng-data:
   chromadb-data:
   ntfy-cache:
+  tts-voices:
+  tts-config:
+  whisper-models:
